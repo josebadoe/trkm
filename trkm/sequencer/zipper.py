@@ -3,10 +3,15 @@ import numbers
 import math
 
 class ZipperWrapper:
-    def __init__(self, name, points):
+    def __init__(self, name, points, bases=[]):
         self.name = name
         self.points = points
-        self.time = points[0].time
+        self.bases = bases
+        ptts = list(map(lambda pt: pt.time, filter(lambda pt: pt is not None, points)))
+        if ptts:
+            self.time = min(ptts)
+        else:
+            self.time = None
 
     def __getattr__(self, key):
         if key in self.__dict__:
@@ -14,12 +19,23 @@ class ZipperWrapper:
         elif key in type(self).__dict__:
             return type(self).__dict__[key]
         else:
-            l0 = list(filter(lambda v: v != None,
-                             map(lambda p: getattr(p, key),
-                                 self.points)))
+            l0 = []
+            for (idx, p) in enumerate(self.points):
+                if p:
+                    # if key == 'distance':
+                    #     print("WILL GET DIST")
+                    v = getattr(p, key)
+                    if (v is not None
+                        and idx < len(self.bases)
+                        and key in self.bases[idx]):
+                        v += self.bases[idx][key]
+                    if v is not None:
+                        l0.append(v)
             if l0 and not isinstance(l0[0], numbers.Number):
                 raise ValueError("%s is not a number in %s" % (key, self.name))
             l = list(filter(lambda v: not math.isnan(v), l0))
+            # if key == 'distance':
+            #     print("DIST: %r" % l)
             if l:
                 v = statistics.mean(l)
                 setattr(self, key, v)
@@ -33,6 +49,11 @@ class Zipper:
         self.interpolators = interpolators
         self.time = None
         self.points = []
+        self.bases = []
+        self.prev_found = [ False ] * len(interpolators)
+        self._prev = None
+        for i in range(0, len(interpolators)):
+            self.bases.append(dict())
 
     def __getitem__(self, k):
         try:
@@ -73,13 +94,21 @@ class Zipper:
             raise StopIteration
         r = []
         name = ""
-        for i in self.interpolators:
+        for (idx, i) in enumerate(self.interpolators):
             if i == None:
                 continue
-            p = i[self.time]
+            p, found = i.get(self.time, return_empty=False)
+            first = found and not self.prev_found[idx]
+            if first:
+                self.prev_found[idx] = found
             if name:
-                name += "-" + p.name
+                name += "-" + (p.name if found else "NONE")
             else:
-                name = p.name
+                name = p.name if found else "NONE"
             r.append(p)
-        self.points.append(ZipperWrapper(name, r))
+            if first and self._prev:
+                self.bases[idx]['distance'] = self._prev.distance
+                print("\nFirst and bases: %r" % self.bases)
+        w = ZipperWrapper(name, r, self.bases)
+        self._prev = w
+        self.points.append(w)
